@@ -1,0 +1,146 @@
+const pool = require('../config/db');
+
+// 1. Crear la emergencia y asignar una ambulancia disponible automáticamente
+const crearEmergencia = async (req, res) => {
+    const { usr_paciente_id, emg_latitud, emg_longitud } = req.body;
+
+    if (!usr_paciente_id || !emg_latitud || !emg_longitud) {
+        return res.status(400).json({
+            error: 'Faltan datos obligatorios para la emergencia'
+        });
+    }
+
+    try {
+        // Buscar una ambulancia disponible
+        const [ambulancias] = await pool.query(
+            "SELECT * FROM ambulancias WHERE amb_estado = 'disponible' LIMIT 1"
+        );
+
+        if (ambulancias.length === 0) {
+            return res.status(404).json({
+                mensaje: 'No hay ambulancias disponibles en este momento'
+            });
+        }
+
+        const ambulanciaAsignada = ambulancias[0];
+
+        // Registrar la emergencia con estado pendiente
+        const [resultadoEmergencia] = await pool.query(
+            `INSERT INTO emergencias
+            (usr_paciente_id, amb_id, emg_latitud, emg_longitud, emg_estado, emg_fecha)
+            VALUES (?, ?, ?, ?, 'pendiente', NOW())`,
+            [
+                usr_paciente_id,
+                ambulanciaAsignada.amb_id,
+                emg_latitud,
+                emg_longitud
+            ]
+        );
+
+        // Cambiar estado de la ambulancia
+        await pool.query(
+            "UPDATE ambulancias SET amb_estado = 'en_emergencia' WHERE amb_id = ?",
+            [ambulanciaAsignada.amb_id]
+        );
+
+        return res.status(201).json({
+            success: true,
+            mensaje: '¡Ambulancia asignada exitosamente!',
+            emergencia_id: resultadoEmergencia.insertId,
+            ambulancia: ambulanciaAsignada
+        });
+
+    } catch (error) {
+        console.error('Error al procesar la emergencia:', error);
+        return res.status(500).json({
+            error: 'Error en el servidor al procesar la emergencia'
+        });
+    }
+};
+
+
+// 2. Consultar la emergencia activa para la ambulancia
+const obtenerEmergenciaActiva = async (req, res) => {
+    const { amb_id } = req.params;
+
+    console.log(`🔍 Buscando emergencia activa para la ambulancia ${amb_id}`);
+
+    try {
+
+        const query = `
+            SELECT
+                e.*,
+                u.usr_nombre AS paciente_nombre,
+                u.usr_correo AS paciente_correo
+            FROM emergencias e
+            INNER JOIN usuarios u
+                ON e.usr_paciente_id = u.usr_id
+            WHERE
+                e.amb_id = ?
+                AND e.emg_estado = 'pendiente'
+            LIMIT 1
+        `;
+
+        const [rows] = await pool.query(query, [amb_id]);
+
+        console.log(rows);
+
+        if (rows.length === 0) {
+            return res.status(404).json({
+                mensaje: 'No hay emergencias activas para esta ambulancia'
+            });
+        }
+
+        return res.json(rows[0]);
+
+    } catch (error) {
+        console.error('Error al obtener emergencia activa:', error);
+
+        return res.status(500).json({
+            error: 'Error en el servidor'
+        });
+    }
+};
+
+
+// 3. Finalizar la emergencia
+const finalizarEmergencia = async (req, res) => {
+    const { emg_id } = req.params;
+    const { amb_id } = req.body;
+
+    try {
+
+        // Cambiar estado de la emergencia
+        await pool.query(
+            "UPDATE emergencias SET emg_estado = 'atendida' WHERE emg_id = ?",
+            [emg_id]
+        );
+
+        // Liberar ambulancia
+        if (amb_id) {
+            await pool.query(
+                "UPDATE ambulancias SET amb_estado = 'disponible' WHERE amb_id = ?",
+                [amb_id]
+            );
+        }
+
+        return res.json({
+            success: true,
+            mensaje: 'Emergencia atendida y ambulancia liberada correctamente'
+        });
+
+    } catch (error) {
+        console.error('Error al finalizar la emergencia:', error);
+
+        return res.status(500).json({
+            error: 'Error en el servidor al finalizar la emergencia'
+        });
+    }
+};
+
+
+module.exports = {
+    crearEmergencia,
+    obtenerEmergenciaActiva,
+    finalizarEmergencia
+};
