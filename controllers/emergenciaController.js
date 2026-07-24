@@ -24,7 +24,7 @@ const crearEmergencia = async (req, res) => {
 
         const ambulanciaAsignada = ambulancias[0];
 
-        // Registrar la emergencia con estado pendiente
+        // Registrar la emergencia con estado pendiente y la ambulancia asignada
         const [resultadoEmergencia] = await pool.query(
             `INSERT INTO emergencias
             (usr_paciente_id, amb_id, emg_latitud, emg_longitud, emg_estado, emg_fecha)
@@ -37,7 +37,7 @@ const crearEmergencia = async (req, res) => {
             ]
         );
 
-        // Cambiar estado de la ambulancia
+        // Cambiar estado de la ambulancia a en_emergencia
         await pool.query(
             "UPDATE ambulancias SET amb_estado = 'en_emergencia' WHERE amb_id = ?",
             [ambulanciaAsignada.amb_id]
@@ -45,7 +45,7 @@ const crearEmergencia = async (req, res) => {
 
         return res.status(201).json({
             success: true,
-            mensaje: '¡Ambulancia asignada exitosamente!',
+            mensaje: '¡Alerta SOS registrada y ambulancia asignada con éxito!',
             emergencia_id: resultadoEmergencia.insertId,
             ambulancia: ambulanciaAsignada
         });
@@ -58,15 +58,13 @@ const crearEmergencia = async (req, res) => {
     }
 };
 
-
-// 2. Consultar la emergencia activa para la ambulancia
+// 2. Consultar la emergencia activa para la ambulancia (detecta pendiente o en camino)
 const obtenerEmergenciaActiva = async (req, res) => {
     const { amb_id } = req.params;
 
     console.log(`🔍 Buscando emergencia activa para la ambulancia ${amb_id}`);
 
     try {
-
         const query = `
             SELECT
                 e.*,
@@ -77,13 +75,11 @@ const obtenerEmergenciaActiva = async (req, res) => {
                 ON e.usr_paciente_id = u.usr_id
             WHERE
                 e.amb_id = ?
-                AND e.emg_estado = 'pendiente'
+                AND (e.emg_estado = 'pendiente' OR e.emg_estado = 'en_camino')
             LIMIT 1
         `;
 
         const [rows] = await pool.query(query, [amb_id]);
-
-        console.log(rows);
 
         if (rows.length === 0) {
             return res.status(404).json({
@@ -95,28 +91,58 @@ const obtenerEmergenciaActiva = async (req, res) => {
 
     } catch (error) {
         console.error('Error al obtener emergencia activa:', error);
-
         return res.status(500).json({
             error: 'Error en el servidor'
         });
     }
 };
 
+// 3. NUEVO: Iniciar ruta (Cuando el paramédico presiona play/iniciar ruta en Ionic)
+const iniciarRuta = async (req, res) => {
+    const { emg_id } = req.params;
+    const { amb_id } = req.body;
 
-// 3. Finalizar la emergencia
+    try {
+        // Actualizar la emergencia a 'en_camino'
+        await pool.query(
+            "UPDATE emergencias SET emg_estado = 'en_camino' WHERE emg_id = ?",
+            [emg_id]
+        );
+
+        // Asegurar que la ambulancia esté marcada como 'en_emergencia'
+        if (amb_id) {
+            await pool.query(
+                "UPDATE ambulancias SET amb_estado = 'en_emergencia' WHERE amb_id = ?",
+                [amb_id]
+            );
+        }
+
+        return res.json({
+            success: true,
+            mensaje: 'Ruta iniciada correctamente, estado actualizado a en_camino'
+        });
+
+    } catch (error) {
+        console.error('Error al iniciar la ruta:', error);
+        return res.status(500).json({
+            error: 'Error en el servidor al iniciar la ruta'
+        });
+    }
+};
+
+// 4. Finalizar la emergencia
 const finalizarEmergencia = async (req, res) => {
     const { emg_id } = req.params;
     const { amb_id } = req.body;
 
     try {
-
-        // Cambiar estado de la emergencia
+        // Cambiar estado de la emergencia a 'atendida'
         await pool.query(
             "UPDATE emergencias SET emg_estado = 'atendida' WHERE emg_id = ?",
             [emg_id]
         );
 
-        // Liberar ambulancia
+        // Liberar ambulancia a 'disponible'
         if (amb_id) {
             await pool.query(
                 "UPDATE ambulancias SET amb_estado = 'disponible' WHERE amb_id = ?",
@@ -131,16 +157,15 @@ const finalizarEmergencia = async (req, res) => {
 
     } catch (error) {
         console.error('Error al finalizar la emergencia:', error);
-
         return res.status(500).json({
             error: 'Error en el servidor al finalizar la emergencia'
         });
     }
 };
 
-
 module.exports = {
     crearEmergencia,
     obtenerEmergenciaActiva,
+    iniciarRuta,
     finalizarEmergencia
 };
