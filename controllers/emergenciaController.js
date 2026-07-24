@@ -97,7 +97,7 @@ const obtenerEmergenciaActiva = async (req, res) => {
     }
 };
 
-// 3. NUEVO: Iniciar ruta (Cuando el paramédico presiona play/iniciar ruta en Ionic)
+// 3. Iniciar ruta (Cuando el paramédico presiona play/iniciar ruta en Ionic)
 const iniciarRuta = async (req, res) => {
     const { emg_id } = req.params;
     const { amb_id } = req.body;
@@ -130,7 +130,7 @@ const iniciarRuta = async (req, res) => {
     }
 };
 
-// 4. Finalizar la emergencia
+// 4. Finalizar la emergencia y limpiar ubicaciones anteriores de la ambulancia
 const finalizarEmergencia = async (req, res) => {
     const { emg_id } = req.params;
     const { amb_id } = req.body;
@@ -146,6 +146,12 @@ const finalizarEmergencia = async (req, res) => {
         if (amb_id) {
             await pool.query(
                 "UPDATE ambulancias SET amb_estado = 'disponible' WHERE amb_id = ?",
+                [amb_id]
+            );
+
+            // Opcional recomendado: Limpiar historial viejo de ubicaciones para que la próxima ruta empiece limpia
+            await pool.query(
+                "DELETE FROM ubicaciones_ambulancias WHERE amb_id = ?",
                 [amb_id]
             );
         }
